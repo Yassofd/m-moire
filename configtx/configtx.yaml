@@ -1,0 +1,186 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# configtx.yaml — Hyperledger Fabric Network Configuration
+# Organisations : SiegeMSP | SpokeMSP | OrdererMSP
+# ─────────────────────────────────────────────────────────────────────────────
+
+Organizations:
+
+  - &OrdererOrg
+    Name: OrdererMSP
+    ID: OrdererMSP
+    MSPDir: /home/yass/backup_hyperledger/consortium/crypto-config/ordererOrganizations/orderer.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+
+  - &Siege
+    Name: SiegeMSP
+    ID: SiegeMSP
+    MSPDir: /home/yass/backup_hyperledger/consortium/crypto-config/peerOrganizations/siege.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('SiegeMSP.admin', 'SiegeMSP.peer', 'SiegeMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('SiegeMSP.admin', 'SiegeMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('SiegeMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('SiegeMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.siege.com
+        Port: 7051
+
+  - &Spoke
+    Name: SpokeMSP
+    ID: SpokeMSP
+    MSPDir: /home/yass/backup_hyperledger/consortium/crypto-config/peerOrganizations/spoke.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('SpokeMSP.admin', 'SpokeMSP.peer', 'SpokeMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('SpokeMSP.admin', 'SpokeMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('SpokeMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('SpokeMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.spoke.com
+        Port: 8051
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Capabilities
+# ─────────────────────────────────────────────────────────────────────────────
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Application
+# ─────────────────────────────────────────────────────────────────────────────
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Orderer
+# ─────────────────────────────────────────────────────────────────────────────
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.orderer.com
+        Port: 7050
+        ClientTLSCert: /home/yass/backup_hyperledger/consortium/crypto-config/ordererOrganizations/orderer.com/orderers/orderer.orderer.com/tls/server.crt
+        ServerTLSCert: /home/yass/backup_hyperledger/consortium/crypto-config/ordererOrganizations/orderer.com/orderers/orderer.orderer.com/tls/server.crt
+
+  Addresses:
+    - orderer.orderer.com:7050
+
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+
+  Organizations:
+
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+  Capabilities:
+    <<: *OrdererCapabilities
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Channel
+# ─────────────────────────────────────────────────────────────────────────────
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profiles
+# ─────────────────────────────────────────────────────────────────────────────
+Profiles:
+
+  TwoOrgsOrdererGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
+    Consortiums:
+      BackupConsortium:
+        Organizations:
+          - *Siege
+          - *Spoke
+
+  TwoOrgsChannel:
+    Consortium: BackupConsortium
+    <<: *ChannelDefaults
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *Siege
+        - *Spoke
+      Capabilities:
+        <<: *ApplicationCapabilities
