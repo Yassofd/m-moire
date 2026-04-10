@@ -93,17 +93,36 @@ fi
 cp $SK_ORDERER $TLS_ORDERER/server.key
 echo "[OK] TLS orderer.orderer.com : server.crt / server.key / ca.crt"
 
+# ── TLS CA → MSP org-level tlscacerts ──
+echo ""
+echo ">>> Copie des TLS CA certs dans les MSP org-level (tlscacerts)..."
+
+mkdir -p $CRYPTO_DIR/ordererOrganizations/orderer.com/msp/tlscacerts
+cp $TLS_ORDERER/tlscacerts/tls-localhost-1212-ca-orderer.pem \
+   $CRYPTO_DIR/ordererOrganizations/orderer.com/msp/tlscacerts/ca.crt
+echo "[OK] orderer.com/msp/tlscacerts/ca.crt"
+
+mkdir -p $CRYPTO_DIR/peerOrganizations/siege.com/msp/tlscacerts
+cp $TLS_SIEGE/tlscacerts/tls-localhost-1010-ca-siege.pem \
+   $CRYPTO_DIR/peerOrganizations/siege.com/msp/tlscacerts/ca.crt
+echo "[OK] siege.com/msp/tlscacerts/ca.crt"
+
+mkdir -p $CRYPTO_DIR/peerOrganizations/spoke.com/msp/tlscacerts
+cp $TLS_SPOKE/tlscacerts/tls-localhost-1111-ca-spoke.pem \
+   $CRYPTO_DIR/peerOrganizations/spoke.com/msp/tlscacerts/ca.crt
+echo "[OK] spoke.com/msp/tlscacerts/ca.crt"
+
 # ── MSP — clés privées ──
 echo ""
 echo ">>> Copie des clés privées MSP..."
 
-SK=$(find $CRYPTO_DIR/peerOrganizations/siege.com/peers/peer0.siege.com/msp/keystore -name "*_sk" | head -1)
+SK=$(find $CRYPTO_DIR/peerOrganizations/siege.com/peers/peer0.siege.com/msp/keystore -name "*_sk" -not -name "priv_sk" | head -1)
 [ -n "$SK" ] && cp $SK $CRYPTO_DIR/peerOrganizations/siege.com/peers/peer0.siege.com/msp/keystore/priv_sk
 
-SK=$(find $CRYPTO_DIR/peerOrganizations/spoke.com/peers/peer0.spoke.com/msp/keystore -name "*_sk" | head -1)
+SK=$(find $CRYPTO_DIR/peerOrganizations/spoke.com/peers/peer0.spoke.com/msp/keystore -name "*_sk" -not -name "priv_sk" | head -1)
 [ -n "$SK" ] && cp $SK $CRYPTO_DIR/peerOrganizations/spoke.com/peers/peer0.spoke.com/msp/keystore/priv_sk
 
-SK=$(find $CRYPTO_DIR/ordererOrganizations/orderer.com/orderers/orderer.orderer.com/msp/keystore -name "*_sk" | head -1)
+SK=$(find $CRYPTO_DIR/ordererOrganizations/orderer.com/orderers/orderer.orderer.com/msp/keystore -name "*_sk" -not -name "priv_sk" | head -1)
 [ -n "$SK" ] && cp $SK $CRYPTO_DIR/ordererOrganizations/orderer.com/orderers/orderer.orderer.com/msp/keystore/priv_sk
 
 echo "[OK] Clés privées MSP copiées"

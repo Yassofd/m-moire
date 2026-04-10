@@ -37,11 +37,38 @@ TLS_SPOKE=$CONSORTIUM_DIR/fabric-ca/spoke/tls-cert.pem
 TLS_ORDERER=$CONSORTIUM_DIR/fabric-ca/ordererOrg/tls-cert.pem
 
 # ─────────────────────────────────────────────
-# FONCTION UTILITAIRE
+# FONCTIONS UTILITAIRES
 # ─────────────────────────────────────────────
 function createDir() {
   mkdir -p $1
   echo "[OK] Répertoire créé : $1"
+}
+
+function writeConfigYaml() {
+  local MSP_DIR="$1"
+  local CA_CERT
+  CA_CERT=$(ls "$MSP_DIR/cacerts"/*.pem 2>/dev/null | head -1 | xargs -I{} basename {})
+  if [ -z "$CA_CERT" ]; then
+    echo "[WARN] Pas de cert CA trouvé dans $MSP_DIR/cacerts, config.yaml ignoré"
+    return
+  fi
+  cat > "$MSP_DIR/config.yaml" <<EOF
+NodeOUs:
+  Enable: true
+  ClientOUIdentifier:
+    Certificate: cacerts/${CA_CERT}
+    OrganizationalUnitIdentifier: client
+  PeerOUIdentifier:
+    Certificate: cacerts/${CA_CERT}
+    OrganizationalUnitIdentifier: peer
+  AdminOUIdentifier:
+    Certificate: cacerts/${CA_CERT}
+    OrganizationalUnitIdentifier: admin
+  OrdererOUIdentifier:
+    Certificate: cacerts/${CA_CERT}
+    OrganizationalUnitIdentifier: orderer
+EOF
+  echo "[OK] config.yaml (NodeOUs) : $MSP_DIR"
 }
 
 # ─────────────────────────────────────────────
@@ -159,6 +186,20 @@ echo ">>> [SIEGE] Copie des certificats CA..."
 cp $SIEGE_ORG_DIR/users/admin/msp/cacerts/*.pem $SIEGE_ORG_DIR/ca/ca.siege.com-cert.pem
 cp $SIEGE_ORG_DIR/users/admin/msp/cacerts/*.pem $SIEGE_ORG_DIR/msp/cacerts/
 
+# ── 7. Copie TLS CA vers MSP org-level (tlscacerts) ──
+echo ""
+echo ">>> [SIEGE] Copie TLS CA vers org MSP..."
+mkdir -p $SIEGE_ORG_DIR/msp/tlscacerts
+cp $SIEGE_ORG_DIR/peers/peer0.siege.com/tls/tlscacerts/tls-localhost-1010-ca-siege.pem \
+   $SIEGE_ORG_DIR/msp/tlscacerts/ca.crt
+
+# ── 8. Génération des config.yaml (NodeOUs) ──
+echo ""
+echo ">>> [SIEGE] Génération des config.yaml..."
+writeConfigYaml $SIEGE_ORG_DIR/msp
+writeConfigYaml $SIEGE_ORG_DIR/peers/peer0.siege.com/msp
+writeConfigYaml $SIEGE_ORG_DIR/users/Admin@siege.com/msp
+
 
 # ═══════════════════════════════════════════════════════
 #                     ORGANISATION SPOKE
@@ -241,6 +282,20 @@ echo ">>> [SPOKE] Copie des certificats CA..."
 cp $SPOKE_ORG_DIR/users/admin/msp/cacerts/*.pem $SPOKE_ORG_DIR/ca/ca.spoke.com-cert.pem
 cp $SPOKE_ORG_DIR/users/admin/msp/cacerts/*.pem $SPOKE_ORG_DIR/msp/cacerts/
 
+# ── 7. Copie TLS CA vers MSP org-level (tlscacerts) ──
+echo ""
+echo ">>> [SPOKE] Copie TLS CA vers org MSP..."
+mkdir -p $SPOKE_ORG_DIR/msp/tlscacerts
+cp $SPOKE_ORG_DIR/peers/peer0.spoke.com/tls/tlscacerts/tls-localhost-1111-ca-spoke.pem \
+   $SPOKE_ORG_DIR/msp/tlscacerts/ca.crt
+
+# ── 8. Génération des config.yaml (NodeOUs) ──
+echo ""
+echo ">>> [SPOKE] Génération des config.yaml..."
+writeConfigYaml $SPOKE_ORG_DIR/msp
+writeConfigYaml $SPOKE_ORG_DIR/peers/peer0.spoke.com/msp
+writeConfigYaml $SPOKE_ORG_DIR/users/Admin@spoke.com/msp
+
 
 # ═══════════════════════════════════════════════════════
 #                   ORGANISATION ORDERER
@@ -322,6 +377,20 @@ echo ""
 echo ">>> [ORDERER] Copie des certificats CA..."
 cp $ORDERER_ORG_DIR/users/admin/msp/cacerts/*.pem $ORDERER_ORG_DIR/ca/ca.orderer.com-cert.pem
 cp $ORDERER_ORG_DIR/users/admin/msp/cacerts/*.pem $ORDERER_ORG_DIR/msp/cacerts/
+
+# ── 7. Copie TLS CA vers MSP org-level (tlscacerts) ──
+echo ""
+echo ">>> [ORDERER] Copie TLS CA vers org MSP..."
+mkdir -p $ORDERER_ORG_DIR/msp/tlscacerts
+cp $ORDERER_ORG_DIR/orderers/orderer.orderer.com/tls/tlscacerts/tls-localhost-1212-ca-orderer.pem \
+   $ORDERER_ORG_DIR/msp/tlscacerts/ca.crt
+
+# ── 8. Génération des config.yaml (NodeOUs) ──
+echo ""
+echo ">>> [ORDERER] Génération des config.yaml..."
+writeConfigYaml $ORDERER_ORG_DIR/msp
+writeConfigYaml $ORDERER_ORG_DIR/orderers/orderer.orderer.com/msp
+writeConfigYaml $ORDERER_ORG_DIR/users/Admin@orderer.com/msp
 
 
 echo ""
