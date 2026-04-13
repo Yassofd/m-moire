@@ -298,6 +298,360 @@ cd script && ./create-certificate.sh
 
 ---
 
+## Application Web — ChainBackup
+
+L'application web est composée d'un backend REST API (Node.js/Express) et d'un frontend React, permettant de gérer les utilisateurs et l'accès à la plateforme ChainBackup.
+
+---
+
+### Stack technique
+
+| Couche | Technologie |
+|--------|-------------|
+| Backend | Node.js 24 + Express + TypeScript |
+| Base de données | SQLite (better-sqlite3) |
+| Authentification | JWT (7 jours) + OTP double canal |
+| Hachage | bcrypt (coût 12) |
+| Validation | Zod |
+| Email OTP | Nodemailer (fallback console si SMTP absent) |
+| SMS OTP | Twilio (fallback console si credentials absents) |
+| Frontend | React + Vite + TypeScript |
+| UI | shadcn/ui + Tailwind CSS |
+| Animations | Framer Motion |
+
+---
+
+### Structure du projet web
+
+```
+backup_hyperledger/
+├── backend/
+│   ├── src/
+│   │   ├── db/index.ts               # SQLite — schéma et connexion
+│   │   ├── middleware/
+│   │   │   └── auth.middleware.ts    # Middleware JWT (requireAuth)
+│   │   ├── routes/
+│   │   │   └── auth.ts               # Routes d'authentification
+│   │   ├── services/
+│   │   │   ├── otp.service.ts        # Génération et vérification OTP
+│   │   │   ├── email.service.ts      # Envoi OTP par email
+│   │   │   └── sms.service.ts        # Envoi OTP par SMS
+│   │   └── server.ts                 # Point d'entrée Express
+│   ├── data/
+│   │   └── chainbackup.db            # Base SQLite (générée au démarrage)
+│   └── .env                          # Variables d'environnement
+└── frontend/chainbackup-nexus/
+    └── src/
+        ├── lib/api.ts                 # Client HTTP typé + session localStorage
+        └── pages/LoginPage.tsx        # Page auth multi-étapes avec OTP
+```
+
+---
+
+### Configuration backend (`.env`)
+
+```env
+PORT=3001
+NODE_ENV=development
+FRONTEND_URL=http://localhost:8080
+JWT_SECRET=dev-secret-change-in-production
+
+# Email SMTP — laisser vide pour logger en console
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=noreply@chainbackup.io
+
+# Twilio SMS — laisser vide pour logger en console
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+```
+
+> En développement, si `SMTP_HOST` et `TWILIO_ACCOUNT_SID` sont vides, les codes OTP sont loggés directement dans la console du backend.
+
+---
+
+### Schéma base de données
+
+```sql
+-- Utilisateurs
+CREATE TABLE users (
+  id             TEXT PRIMARY KEY,         -- UUID v4
+  first_name     TEXT NOT NULL,
+  last_name      TEXT NOT NULL,
+  email          TEXT UNIQUE NOT NULL,
+  recovery_email TEXT NOT NULL,
+  phone          TEXT NOT NULL,
+  password_hash  TEXT NOT NULL,            -- bcrypt coût 12
+  is_active      INTEGER NOT NULL DEFAULT 0, -- 0 = en attente OTP, 1 = actif
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Codes OTP
+CREATE TABLE otps (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  code       TEXT NOT NULL,               -- 6 chiffres
+  channel    TEXT NOT NULL,               -- 'email' | 'phone'
+  purpose    TEXT NOT NULL,               -- 'register' | 'login'
+  expires_at TEXT NOT NULL,               -- TTL 10 minutes
+  used_at    TEXT,                        -- NULL = pas encore utilisé
+  attempts   INTEGER NOT NULL DEFAULT 0, -- max 5 tentatives
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+```
+
+---
+
+### API REST — Authentification
+
+URL de base : `http://localhost:3001`
+
+#### `GET /health`
+
+Vérifie que le serveur est opérationnel.
+
+**Réponse 200 :**
+```json
+{ "status": "ok", "timestamp": "2026-04-13T12:00:00.000Z" }
+```
+
+---
+
+#### `POST /api/auth/register`
+
+Crée un compte utilisateur et envoie les codes OTP (email + SMS).
+
+**Corps :**
+```json
+{
+  "firstName":     "Jean",
+  "lastName":      "Dupont",
+  "email":         "jean@exemple.com",
+  "recoveryEmail": "backup@exemple.com",
+  "phone":         "+33612345678",
+  "password":      "Secret1234"
+}
+```
+
+**Contraintes password :** minimum 8 caractères, au moins une majuscule, au moins un chiffre.
+
+**Réponse 201 :**
+```json
+{
+  "message": "Vérification requise. Codes OTP envoyés par email et SMS.",
+  "userId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Erreurs :**
+| Code | Raison |
+|------|--------|
+| 400 | Données invalides (détails par champ) |
+| 409 | Email déjà utilisé |
+
+---
+
+#### `POST /api/auth/verify-register`
+
+Valide les deux codes OTP et active le compte. Retourne un JWT.
+
+**Corps :**
+```json
+{
+  "userId":   "550e8400-e29b-41d4-a716-446655440000",
+  "emailOtp": "482931",
+  "phoneOtp": "751204"
+}
+```
+
+**Réponse 200 :**
+```json
+{
+  "message": "Compte activé avec succès",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id":        "550e8400-e29b-41d4-a716-446655440000",
+    "firstName": "Jean",
+    "lastName":  "Dupont",
+    "email":     "jean@exemple.com"
+  }
+}
+```
+
+**Erreurs :**
+| Code | Raison |
+|------|--------|
+| 400 | OTP invalide ou expiré (précise quel champ) |
+| 404 | Utilisateur introuvable |
+
+---
+
+#### `POST /api/auth/login`
+
+Vérifie les identifiants et envoie les codes OTP si corrects.
+
+**Corps :**
+```json
+{
+  "email":    "jean@exemple.com",
+  "password": "Secret1234"
+}
+```
+
+**Réponse 200 :**
+```json
+{
+  "message": "Vérification requise. Codes OTP envoyés par email et SMS.",
+  "userId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Erreurs :**
+| Code | Raison |
+|------|--------|
+| 400 | Email ou mot de passe manquant |
+| 401 | Identifiants incorrects (email ou password invalide — même message volontaire) |
+| 403 | Compte non vérifié — retourne `userId` et `action: "verify-register"` |
+
+---
+
+#### `POST /api/auth/verify-login`
+
+Valide les deux codes OTP de connexion. Retourne un JWT.
+
+**Corps :**
+```json
+{
+  "userId":   "550e8400-e29b-41d4-a716-446655440000",
+  "emailOtp": "482931",
+  "phoneOtp": "751204"
+}
+```
+
+**Réponse 200 :**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id":        "550e8400-e29b-41d4-a716-446655440000",
+    "firstName": "Jean",
+    "lastName":  "Dupont",
+    "email":     "jean@exemple.com"
+  }
+}
+```
+
+**Erreurs :**
+| Code | Raison |
+|------|--------|
+| 400 | OTP invalide ou expiré |
+| 404 | Utilisateur introuvable |
+
+---
+
+#### `POST /api/auth/resend-otp`
+
+Régénère et renvoie de nouveaux codes OTP (email + SMS). Invalide les anciens.
+
+**Corps :**
+```json
+{
+  "userId":  "550e8400-e29b-41d4-a716-446655440000",
+  "purpose": "login"
+}
+```
+
+`purpose` : `"register"` ou `"login"`
+
+**Réponse 200 :**
+```json
+{ "message": "Nouveaux codes OTP envoyés" }
+```
+
+---
+
+### Middleware JWT — `requireAuth`
+
+Pour protéger une route, importer et utiliser `requireAuth` :
+
+```typescript
+import { requireAuth, AuthRequest } from "../middleware/auth.middleware";
+
+router.get("/protected", requireAuth, (req: AuthRequest, res) => {
+  res.json({ userId: req.user?.userId });
+});
+```
+
+Le token doit être envoyé dans le header `Authorization: Bearer <token>`.
+
+---
+
+### Logique OTP
+
+- Code à **6 chiffres** généré aléatoirement
+- TTL : **10 minutes**
+- Maximum **5 tentatives** par code (les tentatives sont comptées avant la vérification du code)
+- Les anciens codes non utilisés sont **supprimés** à chaque nouveau `createOtp`
+- Deux codes distincts par action : un pour `email`, un pour `phone`
+
+---
+
+### Frontend — Flow d'authentification
+
+L'interface propose 4 étapes avec transitions animées :
+
+```
+login ──────────► login-otp ──────────► Dashboard (/)
+  │                   ↑ resend
+  └──► register ──► register-otp ──────► Dashboard (/)
+           ↑ resend
+```
+
+| Étape | Contenu |
+|-------|---------|
+| `login` | Email + mot de passe |
+| `login-otp` | Double InputOTP (email + SMS) + renvoi |
+| `register` | Prénom, nom, email, email récupération, téléphone, password, confirmation |
+| `register-otp` | Double InputOTP (email + SMS) + renvoi |
+
+Le token JWT est stocké dans `localStorage` sous la clé `cb_token`.
+
+---
+
+### Démarrage de l'application web
+
+**Prérequis :** Node.js 20+
+
+```bash
+# Backend
+cd backend && npm install && npm run dev
+# → http://localhost:3001
+
+# Frontend (autre terminal)
+cd frontend/chainbackup-nexus && npm run dev
+# → http://localhost:8080
+```
+
+**Test rapide via curl :**
+```bash
+# 1. Register
+curl -s -X POST http://localhost:3001/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Jean","lastName":"Dupont","email":"jean@test.com","recoveryEmail":"backup@test.com","phone":"+33612345678","password":"Secret1234"}' | jq
+
+# → Lire les codes OTP dans la console backend
+
+# 2. Verify register
+curl -s -X POST http://localhost:3001/api/auth/verify-register \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"<userId>","emailOtp":"<code>","phoneOtp":"<code>"}' | jq
+```
+
+---
+
 ## Prochaine étape — Déployer le chaincode
 
 Le répertoire `chaincode-asset-transfer/` est prévu pour accueillir le chaincode (contrat intelligent). Le déploiement suivra le cycle de vie Fabric 2.x :

@@ -4,7 +4,10 @@
       "Bash(wc -l /home/yass/backup_hyperledger/script/*.sh /home/yass/backup_hyperledger/configtx/*.yaml /home/yass/backup_hyperledger/docker/*.yaml)",
       "Bash(du -sh /home/yass/backup_hyperledger/*)",
       "Bash(du -sh /home/yass/backup_hyperledger/consortium/*)",
-      "Bash(sudo ls:*)"
+      "Bash(sudo ls:*)",
+      "Read(//home/yass/.nvm/versions/**)",
+      "Read(//home/yass/.local/share/**)",
+      "Read(//usr/local/bin/**)"
     ]
   }
 }
